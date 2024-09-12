@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"crypto/tls"
-	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -20,6 +19,20 @@ func dial(network, host, port string) (net.Conn, error) {
 	return net.Dial(network, host+":"+port)
 }
 
+type reader struct {
+	r io.Reader
+}
+
+func (r *reader) Read(p []byte) (n int, err error) {
+	return r.r.Read(p)
+}
+
+func newReader(r io.Reader) *reader {
+	return &reader{
+		r: r,
+	}
+}
+
 func main() {
 
 	if len(os.Args) < 3 {
@@ -33,45 +46,22 @@ func main() {
 	if err != nil {
 		log.Fatalln("Dial error:", err)
 	}
-
 	defer conn.Close()
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {
-		for {
-			buf := make([]byte, 1e6)
-
-			n, err := conn.Read(buf)
-
-			if err != nil {
-				if err.Error() == "EOF" {
-					os.Exit(0)
-				}
-
-				log.Fatalln("Read error:", err)
-			}
-
-			if n > 0 {
-				fmt.Println(string(buf[:n-1]))
-			}
+		defer wg.Done()
+		if _, err := io.Copy(os.Stdout, conn); err != nil {
+			log.Fatalln("Receiving error:", err)
 		}
 	}()
 
 	go func() {
-		for {
-			reader := bufio.NewReader(os.Stdin)
-
-			str, err := reader.ReadString('\n')
-			if err != nil {
-				log.Fatalln("Stdin read error:", err)
-			}
-
-			_, err = conn.Write([]byte(str))
-			if err != nil {
-				log.Fatalln("Send error:", err)
-			}
+		defer wg.Done()
+		if _, err := io.Copy(conn, newReader(os.Stdin)); err != nil {
+			log.Fatalln("Sending error:", err)
 		}
 	}()
 
